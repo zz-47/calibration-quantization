@@ -11,7 +11,7 @@ Token-probability calibration on real SLM logits — confidence-to-accuracy mapp
 | 1 | The calibration surface | Confidence does not track accuracy — the reliability curve departs the diagonal | ✅ Complete (4 experiments measured) |
 | 2 | Temperature as the calibration dial | One `T` minimizes ECE and flattens the curve; `T_cal ≠ T_ppl` | ✅ Complete (4 experiments measured) |
 | 3 | Quantization-aware drift | Rounding logits to 8/6/4-bit shifts the distribution — head-robust, tail-moving, widening | ✅ Complete |
-| 4 | Scale granularity: per-row vs whole-matrix | Per-row scales beat whole-matrix scales; group scales saturate; output drift is amplified through the input | ⬜ Scaffolded |
+| 4 | Scale granularity: per-row vs whole-matrix | Per-row scales beat whole-matrix scales; group scales saturate; output drift is amplified through the input | ✅ Complete |
 
 ---
 
@@ -80,6 +80,23 @@ calibration-quantization/
 | C4 | Drift responds to scale | sharper base drifts less | 1.7B KL 0.238 vs 0.319, flips 43% vs 53%; both land at exp(H)=153.5, k90=580 | ✅ Holds, stronger — rounding is a leveler that erases the size difference |
 
 **Verdict in one line.** Rounding cost is a cliff, not a slope: 8-bit is nearly free (3.6% of decisions move), 4-bit replaces half the model's choices (53%) — and the coarsening is a leveler, flattening a sharper 1.7B base to the identical quantized shape as the 135M.
+
+---
+
+## Study 4 — Scale granularity: per-row vs whole-matrix (complete)
+
+**Design.** Re-extract W_Q and W_gate at layers 0/10/20 (SmolLM2-135M, float32) with `X = W_E[:576]`. Quantize each at 8 and 4 bits under whole-matrix / per-row / per-group `g ∈ {8, 32}` scales. Measure weight error `‖W−W_q‖/‖W‖`, output drift `‖X·(W−W_q)ᵀ‖/‖X·Wᵀ‖`, the per-row amplification (pearson between row error and row impact), and the scale-storage cost.
+
+**Measured findings (SmolLM2-135M, not assumed):**
+
+| # | Claim | Predicted | Measured | Verdict |
+|---|---|---|---|---|
+| C1 | Per-row beats whole-matrix | per-row < whole at both depths | gain row 2.34–4.97× across all 6 matrices and both depths; drift falls in lockstep (W_Q L0 b=4: 0.572 → 0.167) | ✅ Holds |
+| C2 | Per-group refines, saturates | group gain shrinks | error strictly falls whole > g32 > g8 > row (W_Q L0 b=4: 0.616 → 0.381 → 0.274 → 0.177); marginal gains shrink; g8 never reaches per-row | ✅ Holds |
+| C3 | Drift tracks error, amplified | drift/error varies by row | pearson +0.25–+0.78 (W_gate 0.41–0.78, W_Q 0.25–0.50); worst-error row ≠ worst-impact row in 7 of 12 runs | ⚠️ Partial — tracks, but the input reweights which rows matter |
+| C4 | Gain is matrix-dependent | W_Q vs W_gate differ | gain row W_gate 3.70–4.97× vs W_Q 2.34–4.17×; W_Q's gain decays with depth (4.17 → 3.09 → 2.47×), W_gate holds ~4–5× | ✅ Holds — the FFN pays more for fine scales |
+
+**Verdict in one line.** Granularity is the cheapest fidelity lever: per-row scales cut 4-bit weight error 2.3–4.8× — and the output drift with it — on every matrix; refinement saturates (whole > g32 > g8 > row); the win concentrates in the FFN; and the price is 8× the scale-storage of 8-wide groups (1536 scales vs 192).
 
 ---
 
