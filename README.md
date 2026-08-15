@@ -9,8 +9,8 @@ Token-probability calibration on real SLM logits — confidence-to-accuracy mapp
 | # | Study | Claim to test | Status |
 |---|-------|-------------|--------|
 | 1 | The calibration surface | Confidence does not track accuracy — the reliability curve departs the diagonal | ✅ Complete (4 experiments measured) |
-| 2 | Temperature as the calibration dial | One `T` minimizes ECE and flattens the curve; `T_cal ≠ T_ppl` | ⬜ Scaffolded |
-| 3 | Quantization-aware drift | Rounding logits to 8/6/4-bit shifts the distribution — head-robust, tail-moving, widening | ⬜ Scaffolded |
+| 2 | Temperature as the calibration dial | One `T` minimizes ECE and flattens the curve; `T_cal ≠ T_ppl` | ✅ Complete (4 experiments measured) |
+| 3 | Quantization-aware drift | Rounding logits to 8/6/4-bit shifts the distribution — head-robust, tail-moving, widening | ✅ Complete |
 | 4 | Scale granularity: per-row vs whole-matrix | Per-row scales beat whole-matrix scales; group scales saturate; output drift is amplified through the input | ⬜ Scaffolded |
 
 ---
@@ -46,6 +46,40 @@ calibration-quantization/
 | C4 | ECE is bin-count dependent | ECE moves with `m` | 0.077 (m=5) → 0.174 (m=40), 2.3× | ✅ Holds |
 
 **Verdict in one line.** The model is globally calibrated (mean conf 0.319 ≈ mean acc 0.317) but locally uncalibrated (ECE 0.14), and the shape inverts the classic story — overconfident in the muddle (conf 0.36–0.45 → acc ~0.15), underconfident when it commits (conf ≥ 0.75 → acc 1.0).
+
+---
+
+## Study 2 — Temperature as the calibration dial (complete)
+
+**Design.** On the same cached logits, sweep `T ∈ {0.5, 0.7, 1, 1.2, 1.5, 2, 3}`; per `T` compute `p_T = softmax(Z/T)`, ECE(m=10), and the squared gap-to-diagonal. Read the curve's minimum, the flattening at `T_cal`, and compare `T_cal` against the likelihood optimum `T_ppl` and the entropy peak `T_ent`.
+
+**Measured findings (SmolLM2-135M, not assumed):**
+
+| # | Claim | Predicted | Measured | Verdict |
+|---|---|---|---|---|
+| C1 | ECE has a minimum in `T` | U-shaped | 0.414 (T=0.5) → 0.139 (T=1.2) → 0.314 (T=3.0); min 1.1% below T=1; sharpening triples ECE, flattening doubles it | ✅ Holds — but the optimum is nearly flat at `T=1` and the U is asymmetric |
+| C2 | `T_cal` flattens the diagram | gap at T_cal < at T=1 | gap² 0.0345 → 0.0256 (−26%); linear ECE moves only 1.1% | ⚠️ Partial — one-directional `T` trades the mid band against the head |
+| C3 | Calibration ≠ likelihood optimum | `T_cal ≠ T_ppl` | 1.2 vs 1.0 (NLL minimized exactly at the training temperature) | ✅ Holds |
+| C4 | Calibration ≠ entropy optimum | `T_cal ≠ T_ent` | 1.2 vs ~2 | ✅ Holds |
+
+**Verdict in one line.** Temperature is a one-direction dial on a two-directional miscalibration — `T_cal = 1.2` fixes the overconfident mid band while worsening the underconfident head, so the scalar gain collapses to 1.1% even as the squared gap falls 26%; and the calibration optimum (1.2) is neither the likelihood optimum (1.0) nor the entropy peak (~2).
+
+---
+
+## Study 3 — Quantization-aware drift (complete)
+
+**Design.** On the cached logits, quantize rows uniformly at `b ∈ {8, 6, 4}` (`s = max|z|/(2^(b−1)−1)`, zero preserved). Per depth: `KL(p_1‖p_q)`, `top1`-flip rate, `exp(H)`, and `k90` on 135M (83 rows) and 1.7B (486 rows).
+
+**Measured findings (SmolLM2, not assumed):**
+
+| # | Claim | Predicted | Measured | Verdict |
+|---|---|---|---|---|
+| C1 | Rounding drift grows as bits fall | monotone in depth | KL 0.001 (8) → 0.017 (6) → 0.319 (4); flips 3.6% → 7.2% → 53% | ✅ Holds — the cliff sits at 4-bit |
+| C2 | The head survives, the tail moves | few flips at all depths | 8/6-bit hold (3.6%/7.2%), 4-bit breaks (53%) | ⚠️ Partial — head-robust is bit-dependent |
+| C3 | Rounding widens the distribution | exp(H) and k90 rise | exp(H) 172.9 → 153.5 (falls); k90 501 → 580 (rises) | ⚠️ Partial — tail inflates while the head sharpens |
+| C4 | Drift responds to scale | sharper base drifts less | 1.7B KL 0.238 vs 0.319, flips 43% vs 53%; both land at exp(H)=153.5, k90=580 | ✅ Holds, stronger — rounding is a leveler that erases the size difference |
+
+**Verdict in one line.** Rounding cost is a cliff, not a slope: 8-bit is nearly free (3.6% of decisions move), 4-bit replaces half the model's choices (53%) — and the coarsening is a leveler, flattening a sharper 1.7B base to the identical quantized shape as the 135M.
 
 ---
 
