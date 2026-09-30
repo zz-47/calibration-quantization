@@ -97,9 +97,3 @@ calibration-quantization/
 | C4 | Gain is matrix-dependent | W_Q vs W_gate differ | gain row W_gate 3.70–4.97× vs W_Q 2.34–4.17×; W_Q's gain decays with depth (4.17 → 3.09 → 2.47×), W_gate holds ~4–5× | ✅ Holds — the FFN pays more for fine scales |
 
 **Verdict in one line.** Granularity is the cheapest fidelity lever: per-row scales cut 4-bit weight error 2.3–4.8× — and the output drift with it — on every matrix; refinement saturates (whole > g32 > g8 > row); the win concentrates in the FFN; and the price is 8× the scale-storage of 8-wide groups (1536 scales vs 192).
-
----
-
-## What this series builds toward
-
-The 13-repo study series maps LoRA from decomposition through deployment on CPU-only real SLM weights. This repo is the trust-the-number core: study 1 reads whether `p` tracks correctness, study 2 drives the one calibration knob, study 3 measures what rounding does to the distribution, study 4 settles the scale granularity that survives quantization. Each notebook is self-contained and every number is measured on real matrices.
